@@ -1,3 +1,4 @@
+import json
 import requests
 from bs4 import BeautifulSoup
 import boto3
@@ -24,7 +25,7 @@ def lambda_handler(event, context):
         response.raise_for_status()
     except requests.RequestException as e:
         logger.error(f"Error al conectar con IGP: {e}")
-        return {'statusCode': 500, 'body': f'Error conectando a IGP: {str(e)}'}
+        return {'statusCode': 500, 'body': json.dumps({'error': f'Error conectando a IGP: {str(e)}'})}
 
     # 2. Parsear HTML
     soup = BeautifulSoup(response.content, 'html.parser')
@@ -42,7 +43,7 @@ def lambda_handler(event, context):
             
     if not target_table:
         logger.error("No se encontró la tabla de sismos en el HTML")
-        return {'statusCode': 404, 'body': 'Estructura de web IGP cambió, tabla no encontrada.'}
+        return {'statusCode': 404, 'body': json.dumps({'error': 'Estructura de web IGP cambió, tabla no encontrada.'})}
 
     # 3. Extraer filas (Limitamos a 10)
     sismos = []
@@ -91,13 +92,13 @@ def lambda_handler(event, context):
                 
         return {
             'statusCode': 200,
-            'body': {
+            'body': json.dumps({
                 'message': 'Scraping exitoso',
                 'cantidad': len(sismos),
                 'data': sismos
-            }
+            })
         }
         
     except Exception as e:
         logger.error(f"Error DB: {e}")
-        return {'statusCode': 500, 'body': f'Error guardando en DynamoDB: {str(e)}'}
+        return {'statusCode': 500, 'body': json.dumps({'error': f'Error guardando en DynamoDB: {str(e)}'})}
