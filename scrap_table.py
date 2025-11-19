@@ -47,23 +47,23 @@ def lambda_handler(event, context):
 
     # 3. Extraer filas (Limitamos a 10)
     sismos = []
-    # El tbody suele contener los datos
-    tbody = target_table.find('tbody')
-    rows = tbody.find_all('tr') if tbody else target_table.find_all('tr')[1:]
+    
+    # Obtenemos todas las filas de la tabla directamente para ser más robustos
+    all_rows = target_table.find_all('tr')
     
     # Iterar y extraer datos
-    for row in rows[:10]: # Solo los 10 primeros
+    # Saltamos la primera fila si asumimos que es header, pero verificamos el contenido
+    for row in all_rows: 
         cells = row.find_all('td')
-        if len(cells) >= 4: # Asegurar que la fila tenga datos
-            # Estructura usual IGP: [Reporte, Fecha, Referencia, Magnitud, ...]
-            # A veces varía, ajustamos basado en la posición visual:
-            # Col 0: Fecha/Hora | Col 1: Referencia (Lugar) | Col 2: Magnitud 
-            # (Nota: Esto depende de la renderización exacta, a veces IGP pone primero el ID)
+        
+        # Si no hay celdas 'td', probablemente es un header 'th' o fila vacía
+        if len(cells) < 4:
+            continue
             
-            # Basado en la inspección visual típica de la tabla IGP:
-            # Columna 0: Enlace/ID, Columna 1: Referencia, Columna 2: Fecha, Columna 3: Magnitud
-            # Vamos a intentar extraer texto limpio
-            
+        # Estructura usual IGP: [Reporte, Fecha, Referencia, Magnitud, ...]
+        # Col 0: Enlace/ID | Col 1: Referencia | Col 2: Fecha | Col 3: Magnitud
+        
+        try:
             data = {
                 'id': str(uuid.uuid4()),
                 'fecha_local': cells[2].get_text(strip=True),
@@ -72,6 +72,11 @@ def lambda_handler(event, context):
                 'reporte_origen': cells[0].get_text(strip=True)
             }
             sismos.append(data)
+        except IndexError:
+            continue
+            
+        if len(sismos) >= 10:
+            break
 
     # 4. Guardar en DynamoDB
     dynamodb = boto3.resource('dynamodb')
