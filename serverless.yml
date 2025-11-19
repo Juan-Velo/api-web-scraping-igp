@@ -1,34 +1,33 @@
+service: api-igp-sismos
 org: juanvelo
-service: api-web-scraping
+app: api-igp-sismos
+frameworkVersion: '3'
 
 provider:
   name: aws
-  runtime: python3.13
-  # Default memory size for functions (default: 1024MB)
-  memorySize: 1024
-  timeout: 20
+  runtime: python3.11
+  memorySize: 512 # 512MB es suficiente para scraping simple
+  timeout: 30     # Aumentado un poco por si el sitio del IGP demora
   iam:
-    role: arn:aws:iam::902206004539:role/LabRole
+    role: arn:aws:iam::902206004539:role/LabRole # VERIFICAR: Reemplaza '902206004539' con tu ID de cuenta AWS actual si es diferente
+  environment:
+    TABLE_NAME: TablaSismosIGP
 
 functions:
-  scrape_table:
-    handler: scrap_table.lambda_handler  # Asegúrarse de que el nombre del archivo y la función coincidan
-    package:
-      include:
-        - ./**  # Incluir todo el contenido del directorio
+  scrape_igp:
+    handler: scrap_table.lambda_handler
     events:
       - http:
-          path: /scrape/table
+          path: /sismos/top10
           method: get
           cors: true
-          integration: lambda
 
 resources:
   Resources:
-    TablaWebScrapping:
+    TablaSismosIGP:
       Type: AWS::DynamoDB::Table
       Properties:
-        TableName: TablaWebScrapping
+        TableName: TablaSismosIGP
         AttributeDefinitions:
           - AttributeName: id
             AttributeType: S
@@ -36,3 +35,10 @@ resources:
           - AttributeName: id
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST
+
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    dockerizePip: non-linux # Ayuda a compilar las librerías correctamente

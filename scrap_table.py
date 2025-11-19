@@ -2,63 +2,100 @@ import requests
 from bs4 import BeautifulSoup
 import boto3
 import uuid
+import os
+import logging
+
+# Configuración de logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 def lambda_handler(event, context):
-    # URL de la página web que contiene la tabla
-    url = "https://sgonorte.bomberosperu.gob.pe/24horas/?criterio=/"
-
-    # Realizar la solicitud HTTP a la página web
-    response = requests.get(url)
-    if response.status_code != 200:
-        return {
-            'statusCode': response.status_code,
-            'body': 'Error al acceder a la página web'
-        }
-
-    # Parsear el contenido HTML de la página web
-    soup = BeautifulSoup(response.content, 'html.parser')
-
-    # Encontrar la tabla en el HTML
-    table = soup.find('table')
-    if not table:
-        return {
-            'statusCode': 404,
-            'body': 'No se encontró la tabla en la página web'
-        }
-
-    # Extraer los encabezados de la tabla
-    headers = [header.text for header in table.find_all('th')]
-
-    # Extraer las filas de la tabla
-    rows = []
-    for row in table.find_all('tr')[1:]:  # Omitir el encabezado
-        cells = row.find_all('td')
-        rows.append({headers[i+1]: cell.text for i, cell in enumerate(cells)})
-
-    # Guardar los datos en DynamoDB
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table('TablaWebScrapping')
-
-    # Eliminar todos los elementos de la tabla antes de agregar los nuevos
-    scan = table.scan()
-    with table.batch_writer() as batch:
-        for each in scan['Items']:
-            batch.delete_item(
-                Key={
-                    'id': each['id']
-                }
-            )
-
-    # Insertar los nuevos datos
-    i = 1
-    for row in rows:
-        row['#'] = i
-        row['id'] = str(uuid.uuid4())  # Generar un ID único para cada entrada
-        table.put_item(Item=row)
-        i = i + 1
-
-    # Retornar el resultado como JSON
-    return {
-        'statusCode': 200,
-        'body': rows
+    url = "https://ultimosismo.igp.gob.pe/ultimo-sismo/sismos-reportados"
+    table_name = os.environ.get('TABLE_NAME', 'TablaSismosIGP')
+    
+    # 1. Realizar la solicitud HTTP (Simulamos ser un navegador para evitar bloqueos simples)
+    headers_agent = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
+    
+    try:
+        response = requests.get(url, headers=headers_agent, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        logger.error(f"Error al conectar con IGP: {e}")
+        return {'statusCode': 500, 'body': f'Error conectando a IGP: {str(e)}'}
+
+    # 2. Parsear HTML
+    soup = BeautifulSoup(response.content, 'html.parser')
+    
+    # En el sitio del IGP, la tabla suele tener la clase 'table' o estar dentro de un contenedor específico
+    # Buscamos la tabla que contiene "Fecha y hora" en sus encabezados
+    target_table = None
+    tables = soup.find_all('table')
+    
+    for t in tables:
+        if t.find('th') and "Magnitud" in t.text:
+            target_table = t
+            break
+            
+    if not target_table:
+        logger.error("No se encontró la tabla de sismos en el HTML")
+        return {'statusCode': 404, 'body': 'Estructura de web IGP cambió, tabla no encontrada.'}
+
+    # 3. Extraer filas (Limitamos a 10)
+    sismos = []
+    # El tbody suele contener los datos
+    tbody = target_table.find('tbody')
+    rows = tbody.find_all('tr') if tbody else target_table.find_all('tr')[1:]
+    
+    # Iterar y extraer datos
+    for row in rows[:10]: # Solo los 10 primeros
+        cells = row.find_all('td')
+        if len(cells) >= 4: # Asegurar que la fila tenga datos
+            # Estructura usual IGP: [Reporte, Fecha, Referencia, Magnitud, ...]
+            # A veces varía, ajustamos basado en la posición visual:
+            # Col 0: Fecha/Hora | Col 1: Referencia (Lugar) | Col 2: Magnitud 
+            # (Nota: Esto depende de la renderización exacta, a veces IGP pone primero el ID)
+            
+            # Basado en la inspección visual típica de la tabla IGP:
+            # Columna 0: Enlace/ID, Columna 1: Referencia, Columna 2: Fecha, Columna 3: Magnitud
+            # Vamos a intentar extraer texto limpio
+            
+            data = {
+                'id': str(uuid.uuid4()),
+                'fecha_local': cells[2].get_text(strip=True),
+                'ubicacion': cells[1].get_text(strip=True),
+                'magnitud': cells[3].get_text(strip=True),
+                'reporte_origen': cells[0].get_text(strip=True)
+            }
+            sismos.append(data)
+
+    # 4. Guardar en DynamoDB
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(table_name)
+
+    try:
+        # A. Eliminar datos antiguos (Scan + Batch Delete)
+        # Nota: En producción con muchos datos, scan es costoso. Para 10 items está bien.
+        scan = table.scan()
+        with table.batch_writer() as batch:
+            for each in scan.get('Items', []):
+                batch.delete_item(Key={'id': each['id']})
+
+        # B. Insertar nuevos datos
+        with table.batch_writer() as batch:
+            for sismo in sismos:
+                batch.put_item(Item=sismo)
+                
+        return {
+            'statusCode': 200,
+            'body': {
+                'message': 'Scraping exitoso',
+                'cantidad': len(sismos),
+                'data': sismos
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error DB: {e}")
+        return {'statusCode': 500, 'body': f'Error guardando en DynamoDB: {str(e)}'}
