@@ -10,7 +10,8 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 def lambda_handler(event, context):
-    url = "https://ultimosismo.igp.gob.pe/ultimo-sismo/sismos-reportados"
+    # URL actualizada que contiene la tabla estática (la principal es SPA)
+    url = "https://www.igp.gob.pe/servicios/centro-sismologico-nacional/ultimo-sismo/sismos-reportados"
     table_name = os.environ.get('TABLE_NAME', 'TablaSismosIGP')
     
     # 1. Realizar la solicitud HTTP (Simulamos ser un navegador para evitar bloqueos simples)
