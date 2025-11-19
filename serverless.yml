@@ -1,6 +1,6 @@
 service: api-igp-sismos
-org: juanvelo
-app: api-igp-sismos
+# org: juanvelo
+# app: api-igp-sismos
 frameworkVersion: '3'
 
 provider:
