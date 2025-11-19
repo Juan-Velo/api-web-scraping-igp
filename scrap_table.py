@@ -29,12 +29,13 @@ def lambda_handler(event, context):
     soup = BeautifulSoup(response.content, 'html.parser')
     
     # En el sitio del IGP, la tabla suele tener la clase 'table' o estar dentro de un contenedor específico
-    # Buscamos la tabla que contiene "Fecha y hora" en sus encabezados
+    # Buscamos la tabla que contiene "Fecha y hora" en sus encabezados o datos típicos
     target_table = None
     tables = soup.find_all('table')
     
     for t in tables:
-        if t.find('th') and "Magnitud" in t.text:
+        # Buscamos "Magnitud" en el texto de la tabla O un patrón de datos conocido como "IGP/CENSIS"
+        if "Magnitud" in t.text or "IGP/CENSIS" in t.text:
             target_table = t
             break
             
